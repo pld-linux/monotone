@@ -1,4 +1,5 @@
 Summary:	A free distributed version control system
+Summary(pl):	Wolnodostêpny rozproszony system kontroli wersji
 Name:		monotone
 Version:	0.13
 Release:	1
@@ -7,28 +8,39 @@ Group:		Development/Version Control
 Source0:	http://www.venge.net/monotone/%{name}-%{version}.tar.gz
 # Source0-md5:	19a9cc07058aba5ab41e0d3264d2a601
 URL:		http://www.venge.net/monotone/
-BuildRequires:	boost-devel >= 1.31.0-2
-BuildRequires:	boost-test-devel
-BuildRequires:	boost-filesystem-devel
 BuildRequires:	boost-date_time-devel
+BuildRequires:	boost-devel >= 1.31.0-2
+BuildRequires:	boost-filesystem-devel
 BuildRequires:	boost-regex-devel
 BuildRequires:	boost-ref-devel
+BuildRequires:	boost-test-devel
 BuildRequires:	libidn-devel
 BuildRequires:	lua50-devel
-BuildRequires:	sqlite-devel
 BuildRequires:	popt-devel
+BuildRequires:	sqlite-devel
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
-monotone is a free distributed version control system. it provides a
+monotone is a free distributed version control system. It provides a
 simple, single-file transactional version store, with fully
 disconnected operation and an efficient peer-to-peer synchronization
-protocol. it understands history-sensitive merging, lightweight
-branches, integrated code review and 3rd party testing. it uses
-cryptographic version naming and client-side RSA certificates. it has
+protocol. It understands history-sensitive merging, lightweight
+branches, integrated code review and 3rd party testing. It uses
+cryptographic version naming and client-side RSA certificates. It has
 good internationalization support, has no external dependencies, runs
-on linux, solaris, OSX, and windows, and is licensed under the GNU
+on Linux, Solaris, MacOS X, and Windows, and is licensed under the GNU
 GPL.
+
+%description -l pl
+monotone to wolnodostêpny, rozproszony system kontroli wersji.
+Dostarcza proste, jednoplikowe, transakcyjne przechowywanie wersji, z
+w pe³ni bezpo³±czeniow± prac± i wydajnym protoko³em synchronizacji
+peer-to-peer. Obs³uguje ³±czenie z uwzglêdnieniem historii, lekkie
+odga³êzienia, zintegrowany podgl±d kodu i testowanie przez osoby
+trzecie. U¿ywa kryptograficznego nazywania wersji i certyfikatów RSA
+po stronie klienta. Ma dobre umiêdzynarodowienie, nie ma zewnêtrznych
+zale¿no¶ci, dzia³a na Linuksie, Solarisie, MacOS-ie X oraz Windows i
+jest licencjonowany na GNU GPL.
 
 %prep
 %setup -q
