@@ -7,10 +7,16 @@ Group:		Development/Version Control
 Source0:	http://www.venge.net/monotone/%{name}-%{version}.tar.gz
 # Source0-md5:	19a9cc07058aba5ab41e0d3264d2a601
 URL:		http://www.venge.net/monotone/
-BuildRequires:	boost-devel
+BuildRequires:	boost-devel >= 1.31.0-2
 BuildRequires:	boost-test-devel
+BuildRequires:	boost-filesystem-devel
+BuildRequires:	boost-date_time-devel
+BuildRequires:	boost-regex-devel
+BuildRequires:	boost-ref-devel
+BuildRequires:	libidn-devel
 BuildRequires:	lua-devel
 BuildRequires:	sqlite-devel
+BuildRequires:	popt-devel
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
@@ -40,7 +46,15 @@ rm -rf $RPM_BUILD_ROOT
 %clean
 rm -rf $RPM_BUILD_ROOT
 
+%post
+[ ! -x /usr/sbin/fix-info-dir ] || /usr/sbin/fix-info-dir %{_infodir} >/dev/null 2>&1
+
+%postun
+[ ! -x /usr/sbin/fix-info-dir ] || /usr/sbin/fix-info-dir %{_infodir} >/dev/null 2>&1
+
 %files
 %defattr(644,root,root,755)
-%doc html ps texi
+%doc AUTHORS NEWS ChangeLog
 %attr(755,root,root) %{_bindir}/*
+%{_infodir}/monotone*
+%{_mandir}/man?/*
