@@ -14,7 +14,7 @@ BuildRequires:	boost-date_time-devel
 BuildRequires:	boost-regex-devel
 BuildRequires:	boost-ref-devel
 BuildRequires:	libidn-devel
-BuildRequires:	lua-devel
+BuildRequires:	lua50-devel
 BuildRequires:	sqlite-devel
 BuildRequires:	popt-devel
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
@@ -34,7 +34,10 @@ GPL.
 %setup -q
 
 %build
-%configure
+CPPFLAGS="-I%{_includedir}/lua50"; export CPPFLAGS
+%configure \
+	--without-bundled-sqlite \
+	--without-bundled-lua
 %{__make}
 
 %install
