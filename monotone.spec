@@ -1,12 +1,16 @@
+# NOTE:
+# - bundled sqlite has local modifications to support large db
+# - bundled lua is stripped, it doesn't contain some features
+#   that create security holes in monotone enviroment
 Summary:	A free distributed version control system
 Summary(pl):	Wolnodostêpny rozproszony system kontroli wersji
 Name:		monotone
-Version:	0.20
+Version:	0.21
 Release:	1
 License:	GPL v2
 Group:		Development/Version Control
 Source0:	http://www.venge.net/monotone/downloads/%{name}-%{version}.tar.gz
-# Source0-md5:	3bdf4da35ff576a401483815952f4045
+# Source0-md5:	c30c96b97ae56268cac567bd8837b991
 URL:		http://www.venge.net/monotone/
 BuildRequires:	boost-date_time-devel
 BuildRequires:	boost-devel >= 1.32.0-3
@@ -15,9 +19,7 @@ BuildRequires:	boost-regex-devel
 BuildRequires:	boost-ref-devel
 BuildRequires:	boost-test-devel
 BuildRequires:	libidn-devel
-BuildRequires:	lua50-devel
 BuildRequires:	popt-devel
-BuildRequires:	sqlite-devel
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
@@ -48,8 +50,7 @@ jest licencjonowany na GNU GPL.
 %build
 CPPFLAGS="-I%{_includedir}/lua50"; export CPPFLAGS
 %configure \
-	--without-bundled-sqlite \
-	--without-bundled-lua
+	--enable-ipv6
 %{__make}
 
 %install
