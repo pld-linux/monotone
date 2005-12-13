@@ -16,8 +16,8 @@ BuildRequires:	boost-date_time-devel
 BuildRequires:	boost-devel >= 1.32.0-3
 BuildRequires:	boost-filesystem-devel
 BuildRequires:	boost-mem_fn-devel
-BuildRequires:	boost-regex-devel
 BuildRequires:	boost-ref-devel
+BuildRequires:	boost-regex-devel
 BuildRequires:	boost-test-devel
 BuildRequires:	libidn-devel
 BuildRequires:	popt-devel
