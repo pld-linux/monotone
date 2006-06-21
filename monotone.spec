@@ -61,8 +61,8 @@ rm -rf $RPM_BUILD_ROOT
 	DESTDIR=$RPM_BUILD_ROOT
 
 %find_lang %{name}
-mv $RPM_BUILD_ROOT/%{_docdir}/%{name}/monotone.html \
-	$RPM_BUILD_ROOT/%{_docdir}/%{name}-%{version}
+mv $RPM_BUILD_ROOT%{_docdir}/%{name}/monotone.html \
+	$RPM_BUILD_ROOT%{_docdir}/%{name}-%{version}
 
 %clean
 rm -rf $RPM_BUILD_ROOT
