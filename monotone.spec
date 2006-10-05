@@ -14,6 +14,8 @@ Source0:	http://www.venge.net/monotone/downloads/%{name}-%{version}.tar.gz
 Patch0:		%{name}-boost_path.patch
 Patch1:		%{name}-cmd_list.patch
 URL:		http://www.venge.net/monotone/
+BuildRequires:	autoconf
+BuildRequires:	automake
 BuildRequires:	boost-bind-devel
 BuildRequires:	boost-date_time-devel
 BuildRequires:	boost-devel >= 1.33.1
