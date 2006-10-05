@@ -6,11 +6,13 @@ Summary:	A free distributed version control system
 Summary(pl):	Wolnodostêpny rozproszony system kontroli wersji
 Name:		monotone
 Version:	0.30
-Release:	1
+Release:	2
 License:	GPL v2
 Group:		Development/Version Control
 Source0:	http://www.venge.net/monotone/downloads/%{name}-%{version}.tar.gz
 # Source0-md5:	94a1f8369162f7a7df8596b365a1d846
+Patch0:		%{name}-boost_path.patch
+Patch1:		%{name}-cmd_list.patch
 URL:		http://www.venge.net/monotone/
 BuildRequires:	boost-bind-devel
 BuildRequires:	boost-date_time-devel
@@ -48,8 +50,13 @@ jest licencjonowany na GNU GPL.
 
 %prep
 %setup -q
+%patch0 -p1
+%patch1 -p1
 
 %build
+%{__aclocal} -I m4
+%{__autoconf}
+%{__automake}
 CPPFLAGS="-I%{_includedir}/lua50"; export CPPFLAGS
 %configure \
 	--enable-ipv6
