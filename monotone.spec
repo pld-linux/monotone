@@ -5,14 +5,13 @@
 Summary:	A free distributed version control system
 Summary(pl):	Wolnodostêpny rozproszony system kontroli wersji
 Name:		monotone
-Version:	0.30
-Release:	2
+Version:	0.31
+Release:	1
 License:	GPL v2
 Group:		Development/Version Control
 Source0:	http://www.venge.net/monotone/downloads/%{name}-%{version}.tar.gz
-# Source0-md5:	94a1f8369162f7a7df8596b365a1d846
+# Source0-md5:	5a5feb8d053a5993ab516a1186bb5883
 Patch0:		%{name}-boost_path.patch
-Patch1:		%{name}-cmd_list.patch
 URL:		http://www.venge.net/monotone/
 BuildRequires:	autoconf
 BuildRequires:	automake
@@ -53,7 +52,6 @@ jest licencjonowany na GNU GPL.
 %prep
 %setup -q
 %patch0 -p1
-%patch1 -p1
 
 %build
 %{__aclocal} -I m4
