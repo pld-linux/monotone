@@ -3,7 +3,7 @@
 # - bundled lua is stripped, it doesn't contain some features
 #   that create security holes in monotone enviroment
 Summary:	A free distributed version control system
-Summary(pl):	Wolnodostêpny rozproszony system kontroli wersji
+Summary(pl.UTF-8):   WolnodostÄ™pny rozproszony system kontroli wersji
 Name:		monotone
 Version:	0.32
 Release:	1
@@ -38,15 +38,15 @@ good internationalization support, has no external dependencies, runs
 on Linux, Solaris, MacOS X, and Windows, and is licensed under the GNU
 GPL.
 
-%description -l pl
-monotone to wolnodostêpny, rozproszony system kontroli wersji.
+%description -l pl.UTF-8
+monotone to wolnodostÄ™pny, rozproszony system kontroli wersji.
 Dostarcza proste, jednoplikowe, transakcyjne przechowywanie wersji, z
-w pe³ni bezpo³±czeniow± prac± i wydajnym protoko³em synchronizacji
-peer-to-peer. Obs³uguje ³±czenie z uwzglêdnieniem historii, lekkie
-odga³êzienia, zintegrowany podgl±d kodu i testowanie przez osoby
-trzecie. U¿ywa kryptograficznego nazywania wersji i certyfikatów RSA
-po stronie klienta. Ma dobre umiêdzynarodowienie, nie ma zewnêtrznych
-zale¿no¶ci, dzia³a na Linuksie, Solarisie, MacOS-ie X oraz Windows i
+w peÅ‚ni bezpoÅ‚Ä…czeniowÄ… pracÄ… i wydajnym protokoÅ‚em synchronizacji
+peer-to-peer. ObsÅ‚uguje Å‚Ä…czenie z uwzglÄ™dnieniem historii, lekkie
+odgaÅ‚Ä™zienia, zintegrowany podglÄ…d kodu i testowanie przez osoby
+trzecie. UÅ¼ywa kryptograficznego nazywania wersji i certyfikatÃ³w RSA
+po stronie klienta. Ma dobre umiÄ™dzynarodowienie, nie ma zewnÄ™trznych
+zaleÅ¼noÅ›ci, dziaÅ‚a na Linuksie, Solarisie, MacOS-ie X oraz Windows i
 jest licencjonowany na GNU GPL.
 
 %prep
