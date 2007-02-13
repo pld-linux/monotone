@@ -3,7 +3,7 @@
 # - bundled lua is stripped, it doesn't contain some features
 #   that create security holes in monotone enviroment
 Summary:	A free distributed version control system
-Summary(pl.UTF-8):   Wolnodostępny rozproszony system kontroli wersji
+Summary(pl.UTF-8):	Wolnodostępny rozproszony system kontroli wersji
 Name:		monotone
 Version:	0.32
 Release:	1
