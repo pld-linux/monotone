@@ -12,6 +12,7 @@ Group:		Development/Version Control
 Source0:	http://monotone.ca/downloads/%{version}/%{name}-%{version}.tar.gz
 # Source0-md5:	9b53046dda8ba7549fa5ce765e14fa65
 URL:		http://www.venge.net/monotone/
+Patch0: 	%{name}-climits.patch
 BuildRequires:	autoconf
 BuildRequires:	automake
 BuildRequires:	boost-bind-devel
@@ -50,6 +51,7 @@ jest licencjonowany na GNU GPL.
 
 %prep
 %setup -q
+%patch0 -p1
 
 %build
 %{__aclocal} -I m4
