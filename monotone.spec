@@ -2,6 +2,9 @@
 # - bundled sqlite has local modifications to support large db
 # - bundled lua is stripped, it doesn't contain some features
 #   that create security holes in monotone enviroment
+# TODO:
+# - subpackage with init-scripts
+# - database format is changing - migrate and regenerate options has to be run.
 Summary:	A free distributed version control system
 Summary(pl.UTF-8):	Wolnodostępny rozproszony system kontroli wersji
 Name:		monotone
