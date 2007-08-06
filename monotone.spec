@@ -8,24 +8,21 @@
 Summary:	A free distributed version control system
 Summary(pl.UTF-8):	Wolnodostępny rozproszony system kontroli wersji
 Name:		monotone
-Version:	0.35
-Release:	3
+Version:	0.36
+Release:	1
 License:	GPL v2
 Group:		Development/Version Control
 Source0:	http://monotone.ca/downloads/%{version}/%{name}-%{version}.tar.gz
-# Source0-md5:	9b53046dda8ba7549fa5ce765e14fa65
+# Source0-md5:	ba6733ebd9992c8c7b48b9e2226f9fb7
 URL:		http://www.venge.net/monotone/
-Patch0: 	%{name}-climits.patch
 BuildRequires:	autoconf
 BuildRequires:	automake
 BuildRequires:	boost-bind-devel
 BuildRequires:	boost-date_time-devel
 BuildRequires:	boost-devel >= 1.33.1
-BuildRequires:	boost-filesystem-devel
 BuildRequires:	boost-program_options-devel
 BuildRequires:	boost-ref-devel
 BuildRequires:	boost-regex-devel
-BuildRequires:	boost-test-devel
 BuildRequires:	libidn-devel
 BuildRequires:	popt-devel
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
@@ -54,7 +51,6 @@ jest licencjonowany na GNU GPL.
 
 %prep
 %setup -q
-%patch0 -p1
 
 %build
 %{__aclocal} -I m4
