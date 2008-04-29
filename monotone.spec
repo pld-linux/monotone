@@ -17,12 +17,7 @@ Source0:	http://monotone.ca/downloads/%{version}/%{name}-%{version}.tar.gz
 URL:		http://www.venge.net/monotone/
 BuildRequires:	autoconf
 BuildRequires:	automake
-BuildRequires:	boost-bind-devel
-BuildRequires:	boost-date_time-devel
-BuildRequires:	boost-devel >= 1.33.1
-BuildRequires:	boost-program_options-devel
-BuildRequires:	boost-ref-devel
-BuildRequires:	boost-regex-devel
+BuildRequires:	boost-devel >= 1.35.0
 BuildRequires:	libidn-devel
 BuildRequires:	popt-devel
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
