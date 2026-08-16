@@ -8,7 +8,7 @@ Summary:	A free distributed version control system
 Summary(pl.UTF-8):	Wolnodostępny rozproszony system kontroli wersji
 Name:		monotone
 Version:	1.1
-Release:	1
+Release:	2
 License:	GPL v2
 Group:		Development/Version Control
 Source0:	http://monotone.ca/downloads/%{version}/%{name}-%{version}.tar.bz2
@@ -74,8 +74,11 @@ jest licencjonowany na GNU GPL.
 %install
 rm -rf $RPM_BUILD_ROOT
 
+# without this automake runs install-info and leaves a %{_infodir}/dir behind,
+# but only on hosts that have it - %post regenerates the index anyway
 %{__make} install \
-	DESTDIR=$RPM_BUILD_ROOT
+	DESTDIR=$RPM_BUILD_ROOT \
+	AM_UPDATE_INFO_DIR=no
 
 %find_lang %{name}
 
@@ -91,8 +94,6 @@ install -d $RPM_BUILD_ROOT%{bash_compdir}
 %{__mv} $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/monotone.bash_completion \
 	$RPM_BUILD_ROOT%{bash_compdir}/mtn
 rmdir $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d
-
-%{__rm} $RPM_BUILD_ROOT%{_infodir}/dir
 
 %clean
 rm -rf $RPM_BUILD_ROOT
