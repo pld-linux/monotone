@@ -1,0 +1,16 @@
+--- monotone-1.1/src/base.hh
++++ monotone-1.1/src/base.hh
+@@ -29,6 +29,13 @@
+ // than 3.3.14.
+ #define SUPPORT_SQLITE_BEFORE_3003014
+ 
++// boost >= 1.73 and botan 2 use E as a template parameter and then write
++// E(...) as a base-class initialiser / throw expression; sanity.hh defines a
++// 3-argument E() macro.  Pull those headers in here, before any macro exists,
++// so their include guards keep them out of later translation units.
++#include <boost/throw_exception.hpp>
++#include <botan/exceptn.h>
++
+ #include <iosfwd>
+ #include <string>  // it would be nice if there were a <stringfwd>
+ 

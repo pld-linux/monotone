@@ -1,0 +1,1396 @@
+--- monotone-1.1/m4/library.m4
++++ monotone-1.1/m4/library.m4
+@@ -176,17 +176,50 @@
+ # Checks for specific libraries that can be probed this way.
+ 
+ AC_DEFUN([MTN_FIND_BOTAN],
+-[MTN_CHECK_MODULE([botan], [1.6.3],
+-  [AC_LANG_PROGRAM(
+-    [#include <botan/botan.h>
+-     #if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(1,6,3)
+-     #error too old
+-     #endif
+-     #if BOTAN_VERSION_CODE == BOTAN_VERSION_CODE_FOR(1,7,14)
+-     #error version 1.7.14 is not usable for monotone
+-     #endif],
+-    [Botan::LibraryInitializer li;])
+-  ])
++[AC_REQUIRE([MTN_FULL_PKG_CONFIG_PATH])
++# Try botan-2 (Botan 2.x) first, then fall back to botan 1.x
++_botan_found=false
++if test -n "$PKG_CONFIG"; then
++  AC_MSG_CHECKING([for botan-2 >= 2.0 using pkg-config])
++  if $PKG_CONFIG --exists "botan-2 >= 2.0" 2>/dev/null; then
++    botan_CFLAGS=`$PKG_CONFIG --cflags botan-2`
++    botan_LIBS=`$PKG_CONFIG --libs botan-2`
++    AC_MSG_RESULT([yes])
++    _botan_found=true
++  else
++    AC_MSG_RESULT([no])
++  fi
++fi
++if ! $_botan_found; then
++  MTN_CHECK_MODULE([botan], [1.9.11],
++    [AC_LANG_PROGRAM(
++      [#include <botan/botan.h>
++       #if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(1,9,11)
++       #error too old
++       #endif],
++      [Botan::LibraryInitializer li;])
++    ])
++  _botan_found=true
++fi
++if $_botan_found && test -n "$botan_CFLAGS$botan_LIBS"; then
++  # Validate the found botan library
++  AC_MSG_CHECKING([whether botan is usable])
++  save_LIBS="$LIBS"
++  save_CPPFLAGS="$CPPFLAGS"
++  LIBS="$LIBS $botan_LIBS"
++  CPPFLAGS="$CPPFLAGS $botan_CFLAGS"
++  AC_LINK_IFELSE(
++    [AC_LANG_PROGRAM(
++      [#include <botan/version.h>],
++      [int v = BOTAN_VERSION_MAJOR;])],
++    [AC_MSG_RESULT([yes])],
++    [AC_MSG_RESULT([no])
++     AC_MSG_FAILURE([Must be able to compile and link programs against botan.])])
++  LIBS="$save_LIBS"
++  CPPFLAGS="$save_CPPFLAGS"
++fi
++AC_SUBST([botan_CFLAGS])
++AC_SUBST([botan_LIBS])
+ ])
+ 
+ AC_DEFUN([MTN_FIND_IDNA],
+--- monotone-1.1/src/botan_pipe_cache.hh
++++ monotone-1.1/src/botan_pipe_cache.hh
+@@ -10,7 +10,13 @@
+ #ifndef __BOTAN_PIPE_CACHE_HH__
+ #define __BOTAN_PIPE_CACHE_HH__
+ 
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/pipe.h>
++#include <botan/filters.h>
++#else
+ #include <botan/botan.h>
++#endif
+ #include <boost/scoped_ptr.hpp>
+ 
+ #include "sanity.hh"
+--- monotone-1.1/src/database.cc
++++ monotone-1.1/src/database.cc
+@@ -25,10 +25,19 @@
+ #include <boost/tuple/tuple.hpp>
+ #include <boost/tuple/tuple_comparison.hpp>
+ 
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/rsa.h>
++#include <botan/pem.h>
++#include <botan/pubkey.h>
++#include <botan/x509_key.h>
++#include <botan/data_src.h>
++#else
+ #include <botan/botan.h>
+ #include <botan/rsa.h>
+ #include <botan/pem.h>
+ #include <botan/look_pk.h>
++#endif
+ #include "lazy_rng.hh"
+ 
+ #include <sqlite3.h>
+@@ -98,13 +107,11 @@
+ using boost::tuple;
+ using boost::lexical_cast;
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,5)
+ using Botan::PK_Encryptor_EME;
+-#else
+-using Botan::PK_Encryptor;
+-#endif
+ using Botan::PK_Verifier;
++#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+ using Botan::SecureVector;
++#endif
+ using Botan::X509_PublicKey;
+ using Botan::RSA_PublicKey;
+ 
+@@ -3428,42 +3435,40 @@
+   rsa_pub_key pub;
+   get_key(pub_id, pub);
+ 
+-  SecureVector<Botan::byte> pub_block
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++  Botan::DataSource_Memory ds_pub(
++    reinterpret_cast<uint8_t const *>(pub().data()), pub().size());
++  shared_ptr<X509_PublicKey> x509_key(Botan::X509::load_key(ds_pub));
++#else
++  Botan::SecureVector<Botan::byte> pub_block
+     (reinterpret_cast<Botan::byte const *>(pub().data()), pub().size());
+-
+   shared_ptr<X509_PublicKey> x509_key(Botan::X509::load_key(pub_block));
++#endif
+   shared_ptr<RSA_PublicKey> pub_key
+     = dynamic_pointer_cast<RSA_PublicKey>(x509_key);
+   if (!pub_key)
+     throw recoverable_failure(origin::system,
+                               "Failed to get RSA encrypting key");
+ 
+-  SecureVector<Botan::byte> ct;
+-
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,5)
+-  PK_Encryptor_EME encryptor(*pub_key, "EME1(SHA-1)");
+-  ct = encryptor.encrypt(
+-          reinterpret_cast<Botan::byte const *>(plaintext.data()),
+-          plaintext.size(), lazy_rng::get());
+-#elif BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+-  shared_ptr<PK_Encryptor>
+-    encryptor(get_pk_encryptor(*pub_key, "EME1(SHA-1)"));
+-
+-  ct = encryptor->encrypt(
+-          reinterpret_cast<Botan::byte const *>(plaintext.data()),
+-          plaintext.size(), lazy_rng::get());
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++  PK_Encryptor_EME encryptor(*pub_key, lazy_rng::get(), "EME1(SHA-1)");
++  std::vector<uint8_t> ct =
++    encryptor.encrypt(
++            reinterpret_cast<uint8_t const *>(plaintext.data()),
++            plaintext.size(), lazy_rng::get());
++  ciphertext = rsa_oaep_sha_data(
++    string(reinterpret_cast<char const *>(ct.data()), ct.size()),
++    origin::database);
+ #else
+-  shared_ptr<PK_Encryptor>
+-    encryptor(Botan::get_pk_encryptor(*pub_key, "EME1(SHA-1)"));
+-
+-  ct = encryptor->encrypt(
+-          reinterpret_cast<Botan::byte const *>(plaintext.data()),
+-          plaintext.size());
+-#endif
+-
++  PK_Encryptor_EME encryptor(*pub_key, "EME1(SHA-1)");
++  Botan::SecureVector<Botan::byte> ct =
++    encryptor.encrypt(
++            reinterpret_cast<Botan::byte const *>(plaintext.data()),
++            plaintext.size(), lazy_rng::get());
+   ciphertext = rsa_oaep_sha_data(
+     string(reinterpret_cast<char const *>(ct.begin()), ct.size()),
+     origin::database);
++#endif
+ }
+ 
+ cert_status
+@@ -3487,22 +3492,23 @@
+         return cert_unknown;
+ 
+       get_key(id, pub);
+-      SecureVector<Botan::byte> pub_block
++      L(FL("building verifier for %d-byte pub key") % pub().size());
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++      Botan::DataSource_Memory ds_pub(
++        reinterpret_cast<uint8_t const *>(pub().data()), pub().size());
++      shared_ptr<X509_PublicKey> x509_key(Botan::X509::load_key(ds_pub));
++#else
++      Botan::SecureVector<Botan::byte> pub_block
+         (reinterpret_cast<Botan::byte const *>(pub().data()), pub().size());
+-
+-      L(FL("building verifier for %d-byte pub key") % pub_block.size());
+       shared_ptr<X509_PublicKey> x509_key(Botan::X509::load_key(pub_block));
++#endif
+       shared_ptr<RSA_PublicKey> pub_key
+         = boost::dynamic_pointer_cast<RSA_PublicKey>(x509_key);
+ 
+       E(pub_key, id.inner().made_from,
+         F("failed to get RSA verifying key for %s") % id);
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,10,0)
+-      verifier.reset(new Botan::PK_Verifier(*pub_key, "EMSA3(SHA1)"));
+-#else
+-      verifier.reset(Botan::get_pk_verifier(*pub_key, "EMSA3(SHA-1)"));
+-#endif
++      verifier.reset(new Botan::PK_Verifier(*pub_key, "EMSA3(SHA-1)"));
+ 
+       /* XXX This is ugly. We need to keep the key around
+        * as long as the verifier is around, but the shared_ptr will go
+@@ -3515,9 +3521,9 @@
+   L(FL("checking %d-byte signature") % signature().size());
+ 
+   if (verifier->verify_message(
+-        reinterpret_cast<Botan::byte const*>(alleged_text.data()),
++        reinterpret_cast<uint8_t const*>(alleged_text.data()),
+         alleged_text.size(),
+-        reinterpret_cast<Botan::byte const*>(signature().data()),
++        reinterpret_cast<uint8_t const*>(signature().data()),
+         signature().size()))
+     return cert_ok;
+   else
+--- monotone-1.1/src/gzip.cc
++++ monotone-1.1/src/gzip.cc
+@@ -16,9 +16,12 @@
+ #include "base.hh"
+ #include "gzip.hh"
+ 
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/loadstor.h>
++#include <botan/filters.h>
++#else
+ #include <botan/botan.h>
+-
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+ #include <botan/loadstor.h>
+ #include <botan/filters.h>
+ #endif
+@@ -29,44 +32,6 @@
+ 
+ namespace Botan {
+ 
+-namespace {
+-
+-/*************************************************
+-* Allocation Information for Zlib                *
+-*************************************************/
+-class Zlib_Alloc_Info
+-   {
+-   public:
+-      std::map<void*, u32bit> current_allocs;
+-      Allocator* alloc;
+-
+-      Zlib_Alloc_Info() { alloc = Allocator::get(false); }
+-   };
+-
+-/*************************************************
+-* Allocation Function for Zlib                   *
+-*************************************************/
+-void* zlib_malloc(void* info_ptr, unsigned int n, unsigned int size)
+-   {
+-   Zlib_Alloc_Info* info = static_cast<Zlib_Alloc_Info*>(info_ptr);
+-   void* ptr = info->alloc->allocate(n * size);
+-   info->current_allocs[ptr] = n * size;
+-   return ptr;
+-   }
+-
+-/*************************************************
+-* Allocation Function for Zlib                   *
+-*************************************************/
+-void zlib_free(void* info_ptr, void* ptr)
+-   {
+-   Zlib_Alloc_Info* info = static_cast<Zlib_Alloc_Info*>(info_ptr);
+-   std::map<void*, u32bit>::const_iterator i = info->current_allocs.find(ptr);
+-   if(i == info->current_allocs.end())
+-      throw Invalid_Argument("zlib_free: Got pointer not allocated by us");
+-   info->alloc->deallocate(ptr, i->second);
+-   }
+-}
+-
+ /*************************************************
+ * Wrapper Type for Zlib z_stream                 *
+ *************************************************/
+@@ -78,14 +43,12 @@
+       Zlib_Stream()
+          {
+          std::memset(&stream, 0, sizeof(z_stream));
+-         stream.zalloc = zlib_malloc;
+-         stream.zfree = zlib_free;
+-         stream.opaque = new Zlib_Alloc_Info;
++         stream.zalloc = Z_NULL;
++         stream.zfree = Z_NULL;
++         stream.opaque = Z_NULL;
+          }
+       ~Zlib_Stream()
+          {
+-         Zlib_Alloc_Info* info = static_cast<Zlib_Alloc_Info*>(stream.opaque);
+-         delete info;
+          std::memset(&stream, 0, sizeof(z_stream));
+          }
+    };
+@@ -94,7 +57,7 @@
+ * Gzip_Compression Constructor                   *
+ *************************************************/
+ Gzip_Compression::Gzip_Compression(u32bit l) :
+-   level((l >= 9) ? 9 : l), buffer(DEFAULT_BUFFERSIZE),
++   level((l >= 9) ? 9 : l), buffer(BOTAN_DEFAULT_BUFFER_SIZE),
+    pipe(new Hash_Filter("CRC32")), count( 0 )
+    {
+ 
+@@ -110,7 +73,7 @@
+    if(deflateInit2(&(zlib->stream), level, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+       {
+       delete zlib; zlib = 0;
+-      throw Memory_Exhaustion();
++      throw std::bad_alloc();
+       }
+    }
+ 
+@@ -148,12 +111,12 @@
+ 
+    while(zlib->stream.avail_in != 0)
+       {
+-      zlib->stream.next_out = (Bytef*)buffer.begin();
++      zlib->stream.next_out = (Bytef*)buffer.data();
+       zlib->stream.avail_out = buffer.size();
+       int rc = deflate(&(zlib->stream), Z_NO_FLUSH);
+       if (rc != Z_OK && rc != Z_STREAM_END)
+          throw Invalid_State("Internal error in Gzip_Compression deflate.");
+-      send(buffer.begin(), buffer.size() - zlib->stream.avail_out);
++      send(buffer.data(), buffer.size() - zlib->stream.avail_out);
+       }
+    }
+ 
+@@ -168,12 +131,12 @@
+    int rc = Z_OK;
+    while(rc != Z_STREAM_END)
+       {
+-      zlib->stream.next_out = (Bytef*)buffer.begin();
++      zlib->stream.next_out = (Bytef*)buffer.data();
+       zlib->stream.avail_out = buffer.size();
+       rc = deflate(&(zlib->stream), Z_FINISH);
+       if (rc != Z_OK && rc != Z_STREAM_END)
+          throw Invalid_State("Internal error in Gzip_Compression finishing deflate.");
+-      send(buffer.begin(), buffer.size() - zlib->stream.avail_out);
++      send(buffer.data(), buffer.size() - zlib->stream.avail_out);
+       }
+ 
+    pipe.end_msg();
+@@ -206,29 +169,29 @@
+    SecureVector<byte> buf(4);
+    SecureVector<byte> tmpbuf(4);
+ 
+-   pipe.read(tmpbuf.begin(), tmpbuf.size(), Pipe::LAST_MESSAGE);
++   pipe.read(tmpbuf.data(), tmpbuf.size(), Pipe::LAST_MESSAGE);
+ 
+    // CRC32 is the reverse order to what gzip expects.
+    for (int i = 0; i < 4; i++)
+       buf[3-i] = tmpbuf[i];
+ 
+-   send(buf.begin(), buf.size());
++   send(buf.data(), buf.size());
+ 
+    // Length - LSB first
+    for (int i = 0; i < 4; i++)
+       buf[3-i] = get_byte(i, count);
+ 
+-   send(buf.begin(), buf.size());
++   send(buf.data(), buf.size());
+    }
+ 
+ /*************************************************
+ * Gzip_Decompression Constructor                 *
+ *************************************************/
+-Gzip_Decompression::Gzip_Decompression() : buffer(DEFAULT_BUFFERSIZE),
++Gzip_Decompression::Gzip_Decompression() : buffer(BOTAN_DEFAULT_BUFFER_SIZE),
+    no_writes(true), pipe(new Hash_Filter("CRC32")), footer(0)
+    {
+-   if (DEFAULT_BUFFERSIZE < sizeof(GZIP::GZIP_HEADER))
+-      throw Decoding_Error("DEFAULT_BUFFERSIZE is too small");
++   if (BOTAN_DEFAULT_BUFFER_SIZE < sizeof(GZIP::GZIP_HEADER))
++      throw Decoding_Error("BOTAN_DEFAULT_BUFFER_SIZE is too small");
+ 
+    zlib = new Zlib_Stream;
+ 
+@@ -237,7 +200,7 @@
+    if(inflateInit2(&(zlib->stream), -15) != Z_OK)
+       {
+       delete zlib; zlib = 0;
+-      throw Memory_Exhaustion();
++      throw std::bad_alloc();
+       }
+    }
+ 
+@@ -307,7 +270,7 @@
+ 
+    while(zlib->stream.avail_in != 0)
+       {
+-      zlib->stream.next_out = (Bytef*)buffer.begin();
++      zlib->stream.next_out = (Bytef*)buffer.data();
+       zlib->stream.avail_out = buffer.size();
+ 
+       int rc = inflate(&(zlib->stream), Z_SYNC_FLUSH);
+@@ -318,11 +281,11 @@
+          if(rc == Z_NEED_DICT)
+             throw Decoding_Error("Gzip_Decompression: Need preset dictionary");
+          if(rc == Z_MEM_ERROR)
+-            throw Memory_Exhaustion();
++            throw std::bad_alloc();
+          throw Decoding_Error("Gzip_Decompression: Unknown decompress error");
+          }
+-      send(buffer.begin(), buffer.size() - zlib->stream.avail_out);
+-      pipe.write(buffer.begin(), buffer.size() - zlib->stream.avail_out);
++      send(buffer.data(), buffer.size() - zlib->stream.avail_out);
++      pipe.write(buffer.data(), buffer.size() - zlib->stream.avail_out);
+       datacount += buffer.size() - zlib->stream.avail_out;
+ 
+       // Reached the end - we now need to check the footer
+@@ -347,14 +310,9 @@
+       if (footer.size() >= GZIP::FOOTER_LENGTH)
+          throw Decoding_Error("Gzip_Decompression: Data integrity error in footer");
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
+       size_t eat_len = std::min(GZIP::FOOTER_LENGTH-footer.size(),
+                                 static_cast<size_t>(length));
+-      footer += std::make_pair(input, eat_len);
+-#else
+-      u32bit eat_len = std::min(GZIP::FOOTER_LENGTH-footer.size(), length);
+-      footer.append(input, eat_len);
+-#endif
++      footer.insert(footer.end(), input, input + eat_len);
+ 
+       if (footer.size() == GZIP::FOOTER_LENGTH)
+          {
+@@ -378,25 +336,20 @@
+    // 4 byte CRC32, and 4 byte length field
+    SecureVector<byte> buf(4);
+    SecureVector<byte> tmpbuf(4);
+-   pipe.read(tmpbuf.begin(), tmpbuf.size(), Pipe::LAST_MESSAGE);
++   pipe.read(tmpbuf.data(), tmpbuf.size(), Pipe::LAST_MESSAGE);
+ 
+   // CRC32 is the reverse order to what gzip expects.
+   for (int i = 0; i < 4; i++)
+      buf[3-i] = tmpbuf[i];
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
+-  tmpbuf.resize(4);
+-  tmpbuf.copy(footer.begin(), 4);
+-#else
+-  tmpbuf.set(footer.begin(), 4);
+-#endif
++  std::copy(footer.data(), footer.data() + 4, tmpbuf.data());
+   if (buf != tmpbuf)
+       throw Decoding_Error("Gzip_Decompression: Data integrity error - CRC32 error");
+ 
+    // Check the length matches - it is encoded LSB-first
+    for (int i = 0; i < 4; i++)
+       {
+-      if (footer.begin()[GZIP::FOOTER_LENGTH-1-i] != get_byte(i, datacount))
++      if (footer.data()[GZIP::FOOTER_LENGTH-1-i] != get_byte(i, datacount))
+          throw Decoding_Error("Gzip_Decompression: Data integrity error - incorrect length");
+       }
+ 
+@@ -424,11 +377,7 @@
+    no_writes = true;
+    inflateReset(&(zlib->stream));
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
+    footer.clear();
+-#else
+-   footer.destroy();
+-#endif
+    pos = 0;
+    datacount = 0;
+    }
+--- monotone-1.1/src/gzip.hh
++++ monotone-1.1/src/gzip.hh
+@@ -10,6 +10,7 @@
+ #include <botan/version.h>
+ #include <botan/filter.h>
+ #include <botan/pipe.h>
++#include <botan/filters.h>
+ 
+ namespace Botan {
+ 
+@@ -26,6 +27,13 @@
+ };
+ #endif
+ 
++// Compatibility: Botan 2.x removed the byte typedef
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++typedef uint8_t byte;
++typedef uint32_t u32bit;
++template<typename T> using SecureVector = secure_vector<T>;
++#endif
++
+ namespace GZIP {
+ 
+    /* A basic header - we only need to set the IDs and compression method */
+@@ -44,11 +52,7 @@
+ 
+ }
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
+ typedef size_t filter_length_t;
+-#else
+-typedef u32bit filter_length_t;
+-#endif
+ 
+ /*************************************************
+ * Gzip Compression Filter                        *
+--- monotone-1.1/src/inodeprint.cc
++++ monotone-1.1/src/inodeprint.cc
+@@ -13,7 +13,10 @@
+ #include <algorithm>
+ #include <iterator>
+ 
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+ #include <botan/botan.h>
++#endif
+ #include <botan/sha160.h>
+ 
+ #include "inodeprint.hh"
+--- monotone-1.1/src/key_packet.cc
++++ monotone-1.1/src/key_packet.cc
+@@ -13,8 +13,18 @@
+ 
+ #include "base.hh"
+ #include <sstream>
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/rsa.h>
++#include <botan/pkcs8.h>
++#include <botan/x509_key.h>
++#include <botan/data_src.h>
++#include <botan/asn1_obj.h>
++#include <botan/ber_dec.h>
++#else
+ #include <botan/botan.h>
+ #include <botan/rsa.h>
++#endif
+ 
+ #include "cset.hh"
+ #include "constants.hh"
+@@ -72,6 +82,30 @@
+ 
+ 
+ // --- reading key_packets from streams ---
++// botan 2 reports "encrypted, and you gave no passphrase" as a Decoding_Error,
++// exactly like real garbage, so structure has to be checked separately: a
++// PKCS#8 EncryptedPrivateKeyInfo is AlgorithmIdentifier + OCTET STRING.
++static bool
++is_encrypted_pkcs8(string const & der)
++{
++  try
++    {
++      Botan::AlgorithmIdentifier alg;
++      std::vector<uint8_t> enc;
++      Botan::BER_Decoder(reinterpret_cast<uint8_t const *>(der.data()),
++                         der.size())
++        .start_cons(Botan::SEQUENCE)
++          .decode(alg)
++          .decode(enc, Botan::OCTET_STRING)
++        .end_cons();
++      return true;
++    }
++  catch (std::exception const &)
++    {
++      return false;
++    }
++}
++
+ namespace
+ {
+   struct
+@@ -106,8 +140,8 @@
+     void validate_public_key_data(string const & name, string const & keydata) const
+     {
+       string decoded = decode_base64_as<string>(keydata, origin::user);
+-      Botan::SecureVector<Botan::byte> key_block
+-        (reinterpret_cast<Botan::byte const *>(decoded.c_str()), decoded.size());
++      Botan::DataSource_Memory key_block(
++        reinterpret_cast<uint8_t const *>(decoded.c_str()), decoded.size());
+       try
+         {
+           Botan::X509::load_key(key_block);
+@@ -133,7 +167,7 @@
+         }
+       catch (Botan::Decoding_Error const & e)
+         {
+-          E(false, origin::user,
++          E(is_encrypted_pkcs8(decoded), origin::user,
+             F("malformed key_packet: invalid private key data for '%s': %s")
+               % name % e.what());
+         }
+--- monotone-1.1/src/key_store.cc
++++ monotone-1.1/src/key_store.cc
+@@ -10,10 +10,23 @@
+ #include "base.hh"
+ #include <sstream>
+ 
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/rsa.h>
++#include <botan/pem.h>
++#include <botan/pkcs8.h>
++#include <botan/pubkey.h>
++#include <botan/x509_key.h>
++#include <botan/data_src.h>
++#include <botan/pipe.h>
++#include <botan/symkey.h>
++#include <botan/filters.h>
++#else
+ #include <botan/botan.h>
+ #include <botan/rsa.h>
+ #include <botan/pem.h>
+ #include <botan/look_pk.h>
++#endif
+ 
+ #include "char_classifiers.hh"
+ #include "key_store.hh"
+@@ -47,14 +60,18 @@
+ 
+ using Botan::RSA_PrivateKey;
+ using Botan::RSA_PublicKey;
+-using Botan::SecureVector;
+ using Botan::X509_PublicKey;
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++using Botan::secure_vector;
++#else
++using Botan::SecureVector;
++using Botan::get_pk_decryptor;
++#endif
++using Botan::get_cipher;
+ using Botan::PKCS8_PrivateKey;
+ using Botan::PK_Decryptor;
+ using Botan::PK_Signer;
+ using Botan::Pipe;
+-using Botan::get_pk_decryptor;
+-using Botan::get_cipher;
+ using Botan::byte;
+ 
+ 
+@@ -573,21 +590,9 @@
+   try // with empty passphrase
+     {
+       Botan::DataSource_Memory ds(kp.priv());
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
+-      pkcs8_key.reset(Botan::PKCS8::load_key(ds, lazy_rng::get(), Dummy_UI()));
+-#elif BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+-      pkcs8_key.reset(Botan::PKCS8::load_key(ds, lazy_rng::get(), ""));
+-#else
+-      pkcs8_key.reset(Botan::PKCS8::load_key(ds, ""));
+-#endif
++      pkcs8_key.reset(Botan::PKCS8::load_key(ds, lazy_rng::get(), std::string()));
+     }
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
+-  catch (Passphrase_Required & e)
+-#elif BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,4)
+-  catch (Botan::Invalid_Argument & e)
+-#else
+-  catch (Botan::Exception & e)
+-#endif
++  catch (std::exception & e)
+     {
+       L(FL("failed to load key with no passphrase: %s") % e.what());
+ 
+@@ -613,23 +618,15 @@
+         try
+           {
+             Botan::DataSource_Memory ds(kp.priv());
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+             pkcs8_key.reset(Botan::PKCS8::load_key(ds, lazy_rng::get(),
+                                                    phrase()));
+-#else
+-            pkcs8_key.reset(Botan::PKCS8::load_key(ds, phrase()));
+-#endif
+             break;
+           }
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,4)
+-        catch (Botan::Invalid_Argument)
+-#else
+-        catch (Botan::Exception & e)
+-#endif
++        catch (std::exception & e2)
+           {
+             cycles++;
+             L(FL("decrypt_private_key: failure %d to load encrypted key: %s")
+-              % cycles % e.what());
++              % cycles % e2.what());
+             E(cycles < 3 && !non_interactive, origin::no_fault,
+               F("failed to decrypt old private RSA key, probably incorrect "
+                 "passphrase or missing 'get_passphrase' lua hook"));
+@@ -702,38 +699,21 @@
+     {
+       L(FL("generating key-pair '%s'") % ident);
+     }
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+   RSA_PrivateKey priv(lazy_rng::get(),
+-                      static_cast<Botan::u32bit>(constants::keylen));
+-#else
+-  RSA_PrivateKey priv(static_cast<Botan::u32bit>(constants::keylen));
+-#endif
++                      static_cast<size_t>(constants::keylen));
+ 
+   // serialize and maybe encrypt the private key
+   keypair kp;
+-  SecureVector<byte> pubkey, privkey;
+ 
+   unfiltered_pipe->start_msg();
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,10,0)
+   if ((*maybe_passphrase)().length())
+     unfiltered_pipe->write(
+       Botan::PKCS8::BER_encode(priv, lazy_rng::get(),
+                                (*maybe_passphrase)(),
+-                               "PBE-PKCS5v20(SHA-1,TripleDES/CBC)"));
++                               std::chrono::milliseconds(300),
++                               "PBE-PKCS5v20(AES-256/CBC,SHA-256)"));
+   else
+     unfiltered_pipe->write(Botan::PKCS8::PEM_encode(priv));
+-#else
+-  if ((*maybe_passphrase)().length())
+-    Botan::PKCS8::encrypt_key(priv, *unfiltered_pipe,
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+-                              lazy_rng::get(),
+-#endif
+-                              (*maybe_passphrase)(),
+-                              "PBE-PKCS5v20(SHA-1,TripleDES/CBC)",
+-                              Botan::RAW_BER);
+-  else
+-    Botan::PKCS8::encode(priv, *unfiltered_pipe);
+-#endif
+   unfiltered_pipe->end_msg();
+ 
+   kp.priv = rsa_priv_key(
+@@ -742,11 +722,7 @@
+ 
+   // serialize the public key
+   unfiltered_pipe->start_msg();
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,10,0)
+   unfiltered_pipe->write(Botan::X509::BER_encode(priv));
+-#else
+-  Botan::X509::encode(priv, *unfiltered_pipe, Botan::RAW_BER);
+-#endif
+   unfiltered_pipe->end_msg();
+   kp.pub = rsa_pub_key(unfiltered_pipe->read_all_as_string(Pipe::LAST_MESSAGE),
+                        origin::internal);
+@@ -813,26 +789,14 @@
+   get_passphrase(new_phrase, name, id, true, false);
+ 
+   unfiltered_pipe->start_msg();
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,10,0)
+   if (new_phrase().length())
+     unfiltered_pipe->write(
+       Botan::PKCS8::BER_encode(*priv, lazy_rng::get(),
+                                new_phrase(),
+-                               "PBE-PKCS5v20(SHA-1,TripleDES/CBC)"));
++                               std::chrono::milliseconds(300),
++                               "PBE-PKCS5v20(AES-256/CBC,SHA-256)"));
+   else
+     unfiltered_pipe->write(Botan::PKCS8::PEM_encode(*priv));
+-#else
+-  if (new_phrase().length())
+-    Botan::PKCS8::encrypt_key(*priv, *unfiltered_pipe,
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+-                              lazy_rng::get(),
+-#endif
+-                              new_phrase(),
+-                              "PBE-PKCS5v20(SHA-1,TripleDES/CBC)",
+-                              Botan::RAW_BER);
+-  else
+-    Botan::PKCS8::encode(*priv, *unfiltered_pipe);
+-#endif
+ 
+   unfiltered_pipe->end_msg();
+   kp.priv = rsa_priv_key(unfiltered_pipe->read_all_as_string(Pipe::LAST_MESSAGE),
+@@ -853,29 +817,22 @@
+       load_key_pair(*this, id, kp);
+       shared_ptr<RSA_PrivateKey> priv_key = s->decrypt_private_key(id);
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,10,0)
+-      Botan::PK_Decryptor_EME decryptor(*priv_key, "EME1(SHA-1)");
+-
+-      SecureVector<byte> plain =
+-        decryptor.decrypt(reinterpret_cast<byte const *>(ciphertext().data()),
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++      Botan::PK_Decryptor_EME decryptor(*priv_key, lazy_rng::get(), "EME1(SHA-1)");
++      Botan::secure_vector<uint8_t> plain =
++        decryptor.decrypt(reinterpret_cast<uint8_t const *>(ciphertext().data()),
+                           ciphertext().size());
+       plaintext = string(plain.begin(), plain.end());
+ #else
+-      shared_ptr<PK_Decryptor>
+-        decryptor(Botan::get_pk_decryptor(*priv_key, "EME1(SHA-1)"));
++      Botan::PK_Decryptor_EME decryptor(*priv_key, "EME1(SHA-1)");
+ 
+-      SecureVector<byte> plain =
+-        decryptor->decrypt(reinterpret_cast<byte const *>(ciphertext().data()),
+-                           ciphertext().size());
+-      plaintext = string(reinterpret_cast<char const*>(plain.begin()),
+-                         plain.size());
++      Botan::SecureVector<Botan::byte> plain =
++        decryptor.decrypt(reinterpret_cast<Botan::byte const *>(ciphertext().data()),
++                          ciphertext().size());
++      plaintext = string(plain.begin(), plain.end());
+ #endif
+     }
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,4)
+   catch (std::exception & e)
+-#else
+-  catch (Botan::Exception & e)
+-#endif
+     {
+       E(false, ciphertext.made_from,
+         F("Botan error decrypting data: '%s'") % e.what());
+@@ -909,12 +866,19 @@
+     {
+       if (agent.connected()) {
+         //grab the monotone public key as an RSA_PublicKey
+-        SecureVector<byte> pub_block
+-          (reinterpret_cast<byte const *>(key.pub().data()),
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++        Botan::DataSource_Memory ds_pub(
++          reinterpret_cast<uint8_t const *>(key.pub().data()),
++          key.pub().size());
++        shared_ptr<X509_PublicKey> x509_key(Botan::X509::load_key(ds_pub));
++#else
++        Botan::SecureVector<Botan::byte> pub_block
++          (reinterpret_cast<Botan::byte const *>(key.pub().data()),
+            key.pub().size());
+         L(FL("make_signature: building %d-byte pub key") % pub_block.size());
+         shared_ptr<X509_PublicKey> x509_key =
+           shared_ptr<X509_PublicKey>(Botan::X509::load_key(pub_block));
++#endif
+         shared_ptr<RSA_PublicKey> pub_key =
+           dynamic_pointer_cast<RSA_PublicKey>(x509_key);
+ 
+@@ -938,8 +902,6 @@
+       || s->ssh_sign_mode == "check"
+       || s->ssh_sign_mode == "no")
+     {
+-      SecureVector<byte> sig;
+-
+       // we permit the user to relax security here, by caching a decrypted key
+       // (if they permit it) through the life of a program run. this helps when
+       // you're making a half-dozen certs during a commit or merge or
+@@ -962,13 +924,8 @@
+             L(FL("make_signature: adding private key (%s) to ssh-agent") % id);
+             agent.add_identity(*priv_key, name());
+           }
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,10,0)
+           signer = shared_ptr<PK_Signer>(
+-                     new PK_Signer(*priv_key, "EMSA3(SHA-1)"));
+-#else
+-          signer = shared_ptr<PK_Signer>(
+-                     get_pk_signer(*priv_key, "EMSA3(SHA-1)"));
+-#endif
++                     new PK_Signer(*priv_key, lazy_rng::get(), "EMSA3(SHA-1)"));
+ 
+           /* If persist_phrase is true, the RSA_PrivateKey object is
+              cached in s->active_keys and will survive as long as the
+@@ -977,16 +934,23 @@
+             s->signer_cache.insert(make_pair(id, signer));
+         }
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+-      sig = signer->sign_message(
+-        reinterpret_cast<byte const *>(tosign.data()),
+-        tosign.size(), lazy_rng::get());
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++      {
++        std::vector<uint8_t> sig =
++          signer->sign_message(
++            reinterpret_cast<uint8_t const *>(tosign.data()),
++            tosign.size(), lazy_rng::get());
++        sig_string = string(reinterpret_cast<char const*>(sig.data()), sig.size());
++      }
+ #else
+-      sig = signer->sign_message(
+-        reinterpret_cast<byte const *>(tosign.data()),
+-        tosign.size());
++      {
++        Botan::SecureVector<Botan::byte> sig =
++          signer->sign_message(
++            reinterpret_cast<Botan::byte const *>(tosign.data()),
++            tosign.size(), lazy_rng::get());
++        sig_string = string(reinterpret_cast<char const*>(sig.begin()), sig.size());
++      }
+ #endif
+-      sig_string = string(reinterpret_cast<char const*>(sig.begin()), sig.size());
+     }
+ 
+   if (s->ssh_sign_mode == "check" && ssh_sig.length() > 0)
+@@ -1053,7 +1017,8 @@
+     p.write(Botan::PKCS8::PEM_encode(*priv,
+                                      lazy_rng::get(),
+                                      new_phrase(),
+-                                     "PBE-PKCS5v20(SHA-1,TripleDES/CBC)"));
++                                     std::chrono::milliseconds(300),
++                                     "PBE-PKCS5v20(AES-256/CBC,SHA-256)"));
+   else
+     p.write(Botan::PKCS8::PEM_encode(*priv));
+ #else
+@@ -1083,7 +1048,7 @@
+      rsa_pub_key const & pub)
+ {
+   keypair kp;
+-  SecureVector<byte> arc4_key;
++  Botan::secure_vector<uint8_t> arc4_key;
+   utf8 phrase;
+   shared_ptr<PKCS8_PrivateKey> pkcs8_key;
+   shared_ptr<RSA_PrivateKey> priv_key;
+@@ -1101,37 +1066,25 @@
+   for (;;)
+     try
+       {
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
+-        arc4_key.resize(phrase().size());
+-        arc4_key.copy(reinterpret_cast<byte const *>(phrase().data()),
+-                      phrase().size());
+-#else
+-        arc4_key.set(reinterpret_cast<byte const *>(phrase().data()),
+-                     phrase().size());
+-#endif
++        arc4_key.assign(phrase().data(),
++                        phrase().data() + phrase().size());
+ 
+-        Pipe arc4_decryptor(get_cipher("ARC4", arc4_key, Botan::DECRYPTION));
++        Pipe arc4_decryptor(Botan::get_cipher("ARC4",
++                                              Botan::SymmetricKey(arc4_key),
++                                              Botan::DECRYPTION));
+ 
+         arc4_decryptor.process_msg(old_priv());
+ 
+         // This is necessary because PKCS8::load_key() cannot currently
+         // recognize an unencrypted, raw-BER blob as such, but gets it
+         // right if it's PEM-coded.
+-        SecureVector<byte> arc4_decrypt(arc4_decryptor.read_all());
++        Botan::secure_vector<uint8_t> arc4_decrypt(arc4_decryptor.read_all());
+         Botan::DataSource_Memory ds(Botan::PEM_Code::encode(arc4_decrypt,
+                                                             "PRIVATE KEY"));
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+         pkcs8_key.reset(Botan::PKCS8::load_key(ds, lazy_rng::get()));
+-#else
+-        pkcs8_key.reset(Botan::PKCS8::load_key(ds));
+-#endif
+         break;
+       }
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,4)
+     catch (Botan::Invalid_Argument & e)
+-#else
+-    catch (Botan::Exception & e)
+-#endif
+       {
+         L(FL("migrate_old_key_pair: failure %d to load old private key: %s")
+           % cycles % e.what());
+@@ -1150,19 +1103,10 @@
+ 
+   // now we can write out the new key
+   unfiltered_pipe->start_msg();
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,10,0)
+   unfiltered_pipe->write(Botan::PKCS8::BER_encode(
+     *priv_key, lazy_rng::get(), phrase(),
+-    "PBE-PKCS5v20(SHA-1,TripleDES/CBC)"));
+-#else
+-  Botan::PKCS8::encrypt_key(*priv_key, *unfiltered_pipe,
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+-                            lazy_rng::get(),
+-#endif
+-                            phrase(),
+-                            "PBE-PKCS5v20(SHA-1,TripleDES/CBC)",
+-                            Botan::RAW_BER);
+-#endif
++    std::chrono::milliseconds(300),
++    "PBE-PKCS5v20(AES-256/CBC,SHA-256)"));
+   unfiltered_pipe->end_msg();
+   kp.priv = rsa_priv_key(unfiltered_pipe->read_all_as_string(Pipe::LAST_MESSAGE),
+                          origin::internal);
+@@ -1171,11 +1115,7 @@
+   // Botan for the X.509 encoding of the private key implies that we want
+   // it to derive and produce the public key)
+   unfiltered_pipe->start_msg();
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,10,0)
+   unfiltered_pipe->write(Botan::X509::BER_encode(*priv_key));
+-#else
+-  Botan::X509::encode(*priv_key, *unfiltered_pipe, Botan::RAW_BER);
+-#endif
+   unfiltered_pipe->end_msg();
+   kp.pub = rsa_pub_key(unfiltered_pipe->read_all_as_string(Pipe::LAST_MESSAGE),
+                        origin::internal);
+--- monotone-1.1/src/key_store.hh
++++ monotone-1.1/src/key_store.hh
+@@ -12,10 +12,15 @@
+ 
+ #include <boost/scoped_ptr.hpp>
+ 
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/rng.h>
++#include <botan/auto_rng.h>
++#elif BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+ #include <botan/botan.h>
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+ #include <botan/rng.h>
+ #else
++#include <botan/botan.h>
+ #include <botan/libstate.h>
+ #endif
+ 
+--- monotone-1.1/src/lazy_rng.hh
++++ monotone-1.1/src/lazy_rng.hh
+@@ -16,7 +16,27 @@
+ 
+ #include <botan/version.h>
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/auto_rng.h>
++#include <botan/rng.h>
++
++class lazy_rng
++{
++  Botan::AutoSeeded_RNG rng;
++  lazy_rng() {}
++
++public:
++
++  static Botan::RandomNumberGenerator & get()
++  {
++    static lazy_rng * instance = 0;
++    if (!instance)
++      instance = new lazy_rng();
++    return instance->rng;
++  }
++};
++
++#elif BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+ #include <botan/rng.h>
+ 
+ class lazy_rng
+--- monotone-1.1/src/merkle_tree.cc
++++ monotone-1.1/src/merkle_tree.cc
+@@ -12,7 +12,10 @@
+ #include <sstream>
+ 
+ #include <boost/dynamic_bitset.hpp>
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+ #include <botan/botan.h>
++#endif
+ #include <botan/sha160.h>
+ 
+ #include "constants.hh"
+--- monotone-1.1/src/monotone.cc
++++ monotone-1.1/src/monotone.cc
+@@ -16,7 +16,10 @@
+ #include <stdlib.h>
+ 
+ #include <sqlite3.h>
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+ #include <botan/botan.h>
++#endif
+ 
+ #include "app_state.hh"
+ #include "database.hh"
+@@ -109,9 +112,12 @@
+       global_sanity.initialize(argc, argv, localename);
+ 
+       // Set up secure memory allocation etc
++      // Botan 2.x does not need explicit initialization
++#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+       Botan::LibraryInitializer acquire_botan("thread_safe=0 selftest=0 "
+                                               "seed_rng=1 use_engines=0 "
+                                               "secure_memory=1 fips140=0");
++#endif
+ 
+       // and caching for botan pipes
+       pipe_cache_cleanup acquire_botan_pipe_caching;
+@@ -147,6 +153,11 @@
+ #endif
+ 
+       // check the botan library version we got linked against.
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++      // Built against Botan 2.x - runtime version check only
++      E(Botan::version_major() >= 2, origin::system,
++        F("this monotone binary requires Botan 2.0 or newer"));
++#else
+       u32 linked_botan_version = BOTAN_VERSION_CODE_FOR(
+         Botan::version_major(), Botan::version_minor(),
+         Botan::version_patch());
+@@ -162,41 +173,6 @@
+       E(linked_botan_version != BOTAN_VERSION_CODE_FOR(1,9,9), origin::system,
+         F("monotone does not support Botan 1.9.9"));
+ 
+-#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(1,7,7)
+-      // motonote binary compiled against botan younger than 1.7.7
+-      E(linked_botan_version >= BOTAN_VERSION_CODE_FOR(1,6,3), origin::system,
+-        F("this monotone binary requires Botan 1.6.3 or newer"));
+-      E(linked_botan_version < BOTAN_VERSION_CODE_FOR(1,7,7), origin::system,
+-        F("this monotone binary does not work with Botan 1.7.7 or newer"));
+-
+-#elif BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(1,7,22)
+-      // motonote binary compiled against botan 1.7.7 - 1.7.21
+-      E(linked_botan_version >= BOTAN_VERSION_CODE_FOR(1,7,7), origin::system,
+-        F("this monotone binary requires Botan 1.7.7 or newer"));
+-      // While compiling against 1.7.22 or newer is recommended, because it
+-      // enables new features of Botan, the monotone binary compiled against
+-      // Botan 1.7.21 and before should still work with newer Botan version,
+-      // including all of the stable branch 1.8.x, up to and including
+-      // 1.9.3.
+-      E(linked_botan_version < BOTAN_VERSION_CODE_FOR(1,9,4), origin::system,
+-        F("this monotone binary does not work with Botan 1.9.4 or newer"));
+-
+-#elif BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(1,9,4)
+-      // motonote binary compiled against botan 1.7.22 - 1.9.3
+-      E(linked_botan_version >= BOTAN_VERSION_CODE_FOR(1,7,22), origin::system,
+-        F("this monotone binary requires Botan 1.7.22 or newer"));
+-      E(linked_botan_version < BOTAN_VERSION_CODE_FOR(1,9,4), origin::system,
+-        F("this monotone binary does not work with Botan 1.9.4 or newer"));
+-
+-#elif BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(1,9,11)
+-      // motonote binary compiled against botan 1.9.4 - 1.9.10
+-#pragma message ( "The resulting monotone binary won't be able to run with any stable release of botan." )
+-      E(linked_botan_version >= BOTAN_VERSION_CODE_FOR(1,9,4), origin::system,
+-        F("this monotone binary requires Botan 1.9.4 or newer"));
+-      E(linked_botan_version < BOTAN_VERSION_CODE_FOR(1,9,11), origin::system,
+-        F("this monotone binary does not work with Botan 1.9.11 or newer"));
+-
+-#else
+       // motonote binary compiled against botan 1.9.11 and newer
+       E(linked_botan_version >= BOTAN_VERSION_CODE_FOR(1,9,11), origin::system,
+         F("this monotone binary requires Botan 1.9.11 or newer"));
+--- monotone-1.1/src/packet.cc
++++ monotone-1.1/src/packet.cc
+@@ -9,8 +9,19 @@
+ 
+ #include "base.hh"
+ #include <sstream>
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/rsa.h>
++#include <botan/pkcs8.h>
++#include <botan/pubkey.h>
++#include <botan/x509_key.h>
++#include <botan/data_src.h>
++#include <botan/asn1_obj.h>
++#include <botan/ber_dec.h>
++#else
+ #include <botan/botan.h>
+ #include <botan/rsa.h>
++#endif
+ 
+ #include "cset.hh"
+ #include "constants.hh"
+@@ -115,6 +126,30 @@
+ 
+ 
+ // --- reading packets from streams ---
++// botan 2 reports "encrypted, and you gave no passphrase" as a Decoding_Error,
++// exactly like real garbage, so structure has to be checked separately: a
++// PKCS#8 EncryptedPrivateKeyInfo is AlgorithmIdentifier + OCTET STRING.
++static bool
++is_encrypted_pkcs8(string const & der)
++{
++  try
++    {
++      Botan::AlgorithmIdentifier alg;
++      std::vector<uint8_t> enc;
++      Botan::BER_Decoder(reinterpret_cast<uint8_t const *>(der.data()),
++                         der.size())
++        .start_cons(Botan::SEQUENCE)
++          .decode(alg)
++          .decode(enc, Botan::OCTET_STRING)
++        .end_cons();
++      return true;
++    }
++  catch (std::exception const &)
++    {
++      return false;
++    }
++}
++
+ namespace
+ {
+   struct
+@@ -156,11 +191,17 @@
+     void validate_public_key_data(string const & name, string const & keydata) const
+     {
+       string decoded = decode_base64_as<string>(keydata, origin::user);
+-      Botan::SecureVector<Botan::byte> key_block
+-        (reinterpret_cast<Botan::byte const *>(decoded.c_str()), decoded.size());
+       try
+         {
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++          Botan::DataSource_Memory ds(
++            reinterpret_cast<uint8_t const *>(decoded.c_str()), decoded.size());
++          Botan::X509::load_key(ds);
++#else
++          Botan::SecureVector<Botan::byte> key_block
++            (reinterpret_cast<Botan::byte const *>(decoded.c_str()), decoded.size());
+           Botan::X509::load_key(key_block);
++#endif
+         }
+       catch (Botan::Decoding_Error const & e)
+         {
+@@ -175,27 +216,17 @@
+       Botan::DataSource_Memory ds(decoded);
+       try
+         {
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
+-          Botan::PKCS8::load_key(ds, lazy_rng::get(), Dummy_UI());
+-#elif BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,7)
+-          Botan::PKCS8::load_key(ds, lazy_rng::get(), string());
+-#else
+-          Botan::PKCS8::load_key(ds, string());
+-#endif
++          Botan::PKCS8::load_key(ds, lazy_rng::get(), std::string());
+         }
+       catch (Botan::Decoding_Error const & e)
+         {
+-          E(false, origin::user,
++          E(is_encrypted_pkcs8(decoded), origin::user,
+             F("malformed packet: invalid private key data for '%s': %s")
+               % name % e.what());
+         }
+       // since we do not want to prompt for a password to decode it finally,
+       // we ignore all other exceptions
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
+-      catch (Passphrase_Required) {}
+-#else
+-      catch (Botan::Invalid_Argument) {}
+-#endif
++      catch (Botan::Invalid_Argument const &) {}
+     }
+     void validate_certname(string const & cn) const
+     {
+@@ -466,8 +497,9 @@
+   return count;
+ }
+ 
+-// Dummy User_Interface implementation for Botan
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
++// Dummy User_Interface implementation for Botan 1.9.11 - 1.x
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11) && \
++    BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+ std::string
+ Dummy_UI::get_passphrase(const std::string &, const std::string &,
+                          Botan::User_Interface::UI_Result&) const
+--- monotone-1.1/src/packet.hh
++++ monotone-1.1/src/packet.hh
+@@ -11,8 +11,11 @@
+ #define __PACKET_HH__
+ 
+ #if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+ #include <botan/ui.h>
+ #endif
++#endif
+ 
+ #include "vocab.hh"
+ 
+@@ -88,7 +91,8 @@
+ 
+ size_t read_packets(std::istream & in, packet_consumer & cons);
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11)
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,9,11) && \
++    BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+ // A helper class implementing Botan::User_Interface - which doesn't really
+ // interface with the user, but provides the necessary plumbing for Botan.
+ //
+--- monotone-1.1/src/sha1.cc
++++ monotone-1.1/src/sha1.cc
+@@ -11,9 +11,10 @@
+ // benchmark them.
+ 
+ #include "base.hh"
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+ #include <botan/botan.h>
+ #include <botan/sha160.h>
+-
+ // Botan 1.7.23+ and 1.8.x specific sha1 benchmarking code uses botan's
+ // own timer and measures botan's different SHA1 providers, instead of
+ // only measuring one.
+@@ -21,6 +22,7 @@
+   #include <botan/libstate.h>
+   #include <botan/benchmark.h>
+ #endif
++#endif
+ 
+ #include "sanity.hh"
+ #include "ui.hh"
+@@ -37,7 +39,8 @@
+ {
+   P(F("Benchmarking botan's SHA-1 core"));
+ 
+-#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,23)
++#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0) && \
++    BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(1,7,23)
+ 
+   Botan::AutoSeeded_RNG rng;
+   Botan::Algorithm_Factory& af =
+--- monotone-1.1/src/ssh_agent.cc
++++ monotone-1.1/src/ssh_agent.cc
+@@ -11,9 +11,17 @@
+ #include <stdlib.h>
+ 
+ #include <boost/shared_ptr.hpp>
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/rsa.h>
++#include <botan/numthry.h>
++#include <botan/x509_key.h>
++#include <botan/data_src.h>
++#else
+ #include <botan/botan.h>
+ #include <botan/rsa.h>
+ #include <botan/numthry.h>
++#endif
+ 
+ #include "ssh_agent.hh"
+ #include "sanity.hh"
+@@ -37,7 +45,9 @@
+ using Botan::RSA_PublicKey;
+ using Botan::RSA_PrivateKey;
+ using Botan::BigInt;
++#if BOTAN_VERSION_CODE < BOTAN_VERSION_CODE_FOR(2,0,0)
+ using Botan::SecureVector;
++#endif
+ using Botan::X509_PublicKey;
+ 
+ struct ssh_agent_state : ssh_agent_platform
+@@ -208,11 +218,11 @@
+   L(FL("ssh_agent: put_bigint_into_buf: bigint.bytes(): %u, bigint: %s")
+     % bi.bytes()
+     % bi);
+-  SecureVector<Botan::byte> bi_buf = BigInt::encode(bi);
++  std::vector<uint8_t> bi_buf = BigInt::encode(bi);
+   string bi_str;
+-  if (*bi_buf.begin() & 0x80)
++  if (*bi_buf.data() & 0x80)
+     bi_str.append(1, static_cast<char>(0));
+-  bi_str.append((char *) bi_buf.begin(), bi_buf.size());
++  bi_str.append(reinterpret_cast<char const *>(bi_buf.data()), bi_buf.size());
+   put_string_into_buf(bi_str, buf);
+   L(FL("ssh_agent: put_bigint_into_buf: buf len now %i") % buf.length());
+ }
+@@ -385,12 +395,19 @@
+ ssh_agent::has_key(const keypair & key)
+ {
+   //grab the monotone public key as an RSA_PublicKey
+-  SecureVector<Botan::byte> pub_block
++  L(FL("has_key: building %d-byte pub key") % (key.pub)().size());
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++  Botan::DataSource_Memory ds_pub(
++    reinterpret_cast<uint8_t const *>((key.pub)().data()),
++    (key.pub)().size());
++  shared_ptr<X509_PublicKey> x509_key(Botan::X509::load_key(ds_pub));
++#else
++  Botan::SecureVector<Botan::byte> pub_block
+     (reinterpret_cast<Botan::byte const *>((key.pub)().data()),
+      (key.pub)().size());
+-  L(FL("has_key: building %d-byte pub key") % pub_block.size());
+   shared_ptr<X509_PublicKey> x509_key =
+     shared_ptr<X509_PublicKey>(Botan::X509::load_key(pub_block));
++#endif
+   shared_ptr<RSA_PublicKey> pub_key = 
+     dynamic_pointer_cast<RSA_PublicKey>(x509_key);
+ 
+--- monotone-1.1/src/transforms.cc
++++ monotone-1.1/src/transforms.cc
+@@ -9,8 +9,14 @@
+ 
+ #include "base.hh"
+ #include <iterator>
++#include <botan/version.h>
++#if BOTAN_VERSION_CODE >= BOTAN_VERSION_CODE_FOR(2,0,0)
++#include <botan/pipe.h>
++#include <botan/filters.h>
++#else
+ #include <botan/botan.h>
+ #include <botan/sha160.h>
++#endif
+ 
+ #include "botan_pipe_cache.hh"
+ #include "gzip.hh"
